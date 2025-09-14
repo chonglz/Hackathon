@@ -1,0 +1,107 @@
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+from typing import List, Dict, Optional
+from datetime import datetime, timedelta, date
+
+app = FastAPI(title="Skill Coach API", version="0.1.0")
+auth_scheme = HTTPBearer()
+
+# ---------------- 数据模型 ----------------
+class SkillItem(BaseModel):
+    name: str
+    level: str = "beginner"
+
+class Task(BaseModel):
+    id: str
+    title: str
+    description: str
+    dueDate: date
+    isDone: bool = False
+
+class AnalyzeRequest(BaseModel):
+    goals: List[str] = []
+    timeCommitment: int = 5   # 小时/周
+
+class AnalyzeResponse(BaseModel):
+    currentSkills: List[str]
+    skillGaps: List[str]
+    recommendations: List[str]
+    tasks: List[Task]
+
+# ---------------- 模拟数据库 ----------------
+TASKS_DB: Dict[str, Task] = {}
+
+# ---------------- Auth ----------------
+def require_auth(token: HTTPAuthorizationCredentials = Depends(auth_scheme)):
+    if token is None or not token.credentials:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
+@app.post("/auth/mock-login")
+def mock_login():
+    return {"access_token": "mock-token", "token_type": "bearer"}
+
+# ---------------- 功能接口 ----------------
+@app.post("/analyze", response_model=AnalyzeResponse)
+def analyze(req: AnalyzeRequest, auth: bool = Depends(require_auth)):
+    # 1) 仍然给个演示用的“已有技能 & 行业基线”
+    current = ["python", "git"]
+    baseline = ["python", "git", "sql", "docker"]
+    gaps = [s for s in baseline if s not in current]
+
+    # 2) 根据 goals 生成任务（每个 goal 变成一个任务）
+    tasks = []
+    for g in req.goals:
+        task_id = f"task-{g.replace(' ', '_')}"
+        task = Task(
+            id=task_id,
+            title=f"{g}",
+            description=f"在 1 周内完成：{g}",
+            dueDate=date.today() + timedelta(days=7),
+            isDone=False
+        )
+        TASKS_DB[task.id] = task
+        tasks.append(task)
+
+    # 3) 如果 goals 为空，再回退到“补差距”的 demo（兼容老流程）
+    if not tasks and gaps:
+        for g in gaps:
+            task = Task(
+                id=f"task-{g}",
+                title=f"学习 {g}",
+                description=f"在 1 周内掌握 {g}",
+                dueDate=date.today() + timedelta(days=7),
+                isDone=False
+            )
+            TASKS_DB[task.id] = task
+            tasks.append(task)
+
+    recs = []
+    if req.goals:
+        recs.append("已根据你的 goals 生成任务: " + ", ".join(req.goals))
+    if gaps:
+        recs.append("建议补差距技能: " + ", ".join(gaps))
+
+    return AnalyzeResponse(
+        currentSkills=current,
+        skillGaps=gaps,
+        recommendations=recs,
+        tasks=tasks
+    )
+
+@app.get("/tasks", response_model=List[Task])
+def get_tasks(auth: bool = Depends(require_auth)):
+    return list(TASKS_DB.values())
+
+@app.post("/tasks/{task_id}/done")
+def mark_done(task_id: str, auth: bool = Depends(require_auth)):
+    if task_id not in TASKS_DB:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    TASKS_DB[task_id].isDone = True
+    return {"msg": f"任务 {task_id} 已完成"}
+
+@app.post("/reset")
+def reset_tasks(auth: bool = Depends(require_auth)):
+    TASKS_DB.clear()
+    return {"ok": True, "message": "All tasks cleared."}
