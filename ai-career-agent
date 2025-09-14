@@ -1,0 +1,708 @@
+import json
+import re
+import hashlib
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+import uuid
+from dataclasses import dataclass, asdict
+from enum import Enum
+
+class TaskDifficulty(Enum):
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+class SkillLevel(Enum):
+    NOVICE = 1
+    BEGINNER = 2
+    INTERMEDIATE = 3
+    ADVANCED = 4
+    EXPERT = 5
+
+@dataclass
+class Goal:
+    id: str
+    title: str
+    deadline: str
+    priority: str
+    description: str
+    target_skill_level: int
+    current_progress: int = 0
+
+@dataclass
+class DailyTask:
+    id: str
+    title: str
+    description: str
+    estimated_time: int  # in minutes
+    difficulty: TaskDifficulty
+    skill_category: str
+    resources: List[str]
+    success_criteria: List[str]
+    is_completed: bool = False
+    completion_date: Optional[str] = None
+
+class ResumeAnonymizer:
+    """Handles anonymization/desensitization of resume data"""
+    
+    def __init__(self):
+        self.pii_patterns = {
+            'email': r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+            'phone': r'(\+\d{1,3}[-.\s]?)?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',
+            'address': r'\d+\s+[A-Za-z\s]+(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr)',
+            'ssn': r'\b\d{3}-?\d{2}-?\d{4}\b',
+            'name': r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b'  # Simple name pattern
+        }
+    
+    def anonymize_text(self, text: str) -> str:
+        """Replace PII with anonymized placeholders"""
+        anonymized = text
+        
+        # Replace emails
+        anonymized = re.sub(self.pii_patterns['email'], '[EMAIL_REDACTED]', anonymized)
+        
+        # Replace phone numbers
+        anonymized = re.sub(self.pii_patterns['phone'], '[PHONE_REDACTED]', anonymized)
+        
+        # Replace addresses
+        anonymized = re.sub(self.pii_patterns['address'], '[ADDRESS_REDACTED]', anonymized)
+        
+        # Replace SSN
+        anonymized = re.sub(self.pii_patterns['ssn'], '[SSN_REDACTED]', anonymized)
+        
+        return anonymized
+    
+    def extract_skills_safely(self, resume_text: str) -> List[str]:
+        """Extract skills while maintaining anonymity"""
+        anonymized_text = self.anonymize_text(resume_text)
+        
+        # Common skill keywords (expanded list)
+        skill_keywords = {
+            'programming': ['python', 'java', 'javascript', 'c++', 'c#', 'react', 'node.js', 'angular', 'vue.js'],
+            'data_science': ['pandas', 'numpy', 'scikit-learn', 'tensorflow', 'pytorch', 'sql', 'r', 'tableau'],
+            'cloud': ['aws', 'azure', 'gcp', 'docker', 'kubernetes', 'terraform'],
+            'soft_skills': ['leadership', 'communication', 'project management', 'agile', 'scrum'],
+            'databases': ['mysql', 'postgresql', 'mongodb', 'redis', 'elasticsearch'],
+            'tools': ['git', 'jenkins', 'jira', 'confluence', 'slack']
+        }
+        
+        found_skills = []
+        text_lower = anonymized_text.lower()
+        
+        for category, skills in skill_keywords.items():
+            for skill in skills:
+                if skill in text_lower:
+                    found_skills.append(skill)
+        
+        return list(set(found_skills))  # Remove duplicates
+
+class ESCOSkillFramework:
+    """Simulated ESCO EU Skill Framework integration"""
+    
+    def __init__(self):
+        self.skill_taxonomy = {
+            'software_development': {
+                'required_skills': ['programming', 'version_control', 'testing', 'debugging'],
+                'recommended_skills': ['system_design', 'databases', 'apis', 'security'],
+                'industry_standard_level': SkillLevel.INTERMEDIATE,
+                'market_demand': 'high'
+            },
+            'data_science': {
+                'required_skills': ['statistics', 'data_analysis', 'machine_learning', 'python'],
+                'recommended_skills': ['data_visualization', 'big_data', 'cloud_computing'],
+                'industry_standard_level': SkillLevel.INTERMEDIATE,
+                'market_demand': 'very_high'
+            },
+            'product_management': {
+                'required_skills': ['product_strategy', 'user_research', 'analytics', 'communication'],
+                'recommended_skills': ['technical_knowledge', 'design_thinking', 'market_analysis'],
+                'industry_standard_level': SkillLevel.INTERMEDIATE,
+                'market_demand': 'high'
+            }
+        }
+    
+    def get_skill_requirements(self, role: str) -> Dict:
+        return self.skill_taxonomy.get(role, {})
+    
+    def benchmark_skills(self, user_skills: List[str], target_role: str) -> Dict:
+        role_requirements = self.get_skill_requirements(target_role)
+        if not role_requirements:
+            return {'error': 'Role not found in taxonomy'}
+        
+        required_skills = role_requirements['required_skills']
+        recommended_skills = role_requirements['recommended_skills']
+        
+        missing_required = [skill for skill in required_skills if skill not in user_skills]
+        missing_recommended = [skill for skill in recommended_skills if skill not in user_skills]
+        
+        skill_coverage = len([s for s in required_skills if s in user_skills]) / len(required_skills)
+        
+        return {
+            'skill_coverage_percentage': round(skill_coverage * 100, 2),
+            'missing_required_skills': missing_required,
+            'missing_recommended_skills': missing_recommended,
+            'market_demand': role_requirements['market_demand'],
+            'target_skill_level': role_requirements['industry_standard_level']
+        }
+
+class DailyTaskGenerator:
+    """Generates personalized daily tasks based on goals and skill gaps"""
+    
+    def __init__(self):
+        self.task_templates = {
+            'programming': {
+                TaskDifficulty.BEGINNER: [
+                    {
+                        'title': 'Complete Python Basics Module',
+                        'description': 'Complete the "Variables and Data Types" section on Codecademy Python course',
+                        'estimated_time': 60,
+                        'resources': ['https://codecademy.com/python', 'Python official tutorial'],
+                        'success_criteria': ['Complete 5 coding exercises', 'Pass the section quiz']
+                    }
+                ],
+                TaskDifficulty.INTERMEDIATE: [
+                    {
+                        'title': 'Build a Mini Project',
+                        'description': 'Create a simple calculator app using Python with error handling',
+                        'estimated_time': 120,
+                        'resources': ['Python documentation', 'Real Python tutorials'],
+                        'success_criteria': ['Working calculator with +,-,*,/ operations', 'Handle division by zero']
+                    }
+                ],
+                TaskDifficulty.ADVANCED: [
+                    {
+                        'title': 'Implement Design Pattern',
+                        'description': 'Implement the Observer design pattern in a real-world scenario',
+                        'estimated_time': 180,
+                        'resources': ['Gang of Four Design Patterns book', 'Refactoring Guru'],
+                        'success_criteria': ['Working implementation', 'Unit tests coverage > 80%']
+                    }
+                ]
+            },
+            'data_analysis': {
+                TaskDifficulty.BEGINNER: [
+                    {
+                        'title': 'Pandas Data Manipulation',
+                        'description': 'Learn to load, clean, and filter a CSV dataset using pandas',
+                        'estimated_time': 90,
+                        'resources': ['Pandas official documentation', 'Kaggle Learn Pandas course'],
+                        'success_criteria': ['Successfully load dataset', 'Perform 3 different filtering operations']
+                    }
+                ]
+            },
+            'soft_skills': {
+                TaskDifficulty.BEGINNER: [
+                    {
+                        'title': 'Communication Practice',
+                        'description': 'Record a 2-minute elevator pitch about your current project',
+                        'estimated_time': 45,
+                        'resources': ['TED Talks on presentation skills', 'Toastmasters guidelines'],
+                        'success_criteria': ['Clear problem statement', 'Concise solution explanation', 'Call to action']
+                    }
+                ]
+            }
+        }
+    
+    def generate_tasks_for_goal(self, goal: Goal, user_skill_level: SkillLevel, days_remaining: int) -> List[DailyTask]:
+        """Generate daily tasks to achieve a specific goal"""
+        tasks = []
+        skill_category = self._determine_skill_category(goal.title)
+        
+        # Adjust difficulty based on user skill level and time remaining
+        if days_remaining > 30:
+            difficulty = TaskDifficulty.BEGINNER if user_skill_level.value <= 2 else TaskDifficulty.INTERMEDIATE
+        elif days_remaining > 7:
+            difficulty = TaskDifficulty.INTERMEDIATE if user_skill_level.value <= 3 else TaskDifficulty.ADVANCED
+        else:
+            difficulty = TaskDifficulty.ADVANCED  # Intensive tasks for urgent goals
+        
+        # Get task templates
+        templates = self.task_templates.get(skill_category, {}).get(difficulty, [])
+        
+        if not templates:
+            # Generate generic task if no template found
+            task = DailyTask(
+                id=str(uuid.uuid4()),
+                title=f"Work on {goal.title}",
+                description=f"Spend focused time working towards: {goal.description}",
+                estimated_time=60,
+                difficulty=difficulty,
+                skill_category=skill_category,
+                resources=["Search for relevant online courses", "Join related Discord/Reddit communities"],
+                success_criteria=["Complete 1 hour of focused work", "Document progress made"]
+            )
+            tasks.append(task)
+        else:
+            # Use template to create task
+            template = templates[0]  # For now, use first template
+            task = DailyTask(
+                id=str(uuid.uuid4()),
+                title=template['title'],
+                description=template['description'],
+                estimated_time=template['estimated_time'],
+                difficulty=difficulty,
+                skill_category=skill_category,
+                resources=template['resources'],
+                success_criteria=template['success_criteria']
+            )
+            tasks.append(task)
+        
+        return tasks
+    
+    def _determine_skill_category(self, goal_title: str) -> str:
+        """Determine skill category based on goal title"""
+        goal_lower = goal_title.lower()
+        
+        if any(keyword in goal_lower for keyword in ['python', 'java', 'programming', 'coding', 'development']):
+            return 'programming'
+        elif any(keyword in goal_lower for keyword in ['data', 'analysis', 'statistics', 'ml', 'machine learning']):
+            return 'data_analysis'
+        elif any(keyword in goal_lower for keyword in ['communication', 'leadership', 'presentation', 'management']):
+            return 'soft_skills'
+        else:
+            return 'general'
+
+class AdvancedCareerAgent:
+    """Main AI agent for early talent career guidance"""
+    
+    def __init__(self):
+        self.user_profile = {}
+        self.goals = []
+        self.daily_tasks = []
+        self.completed_tasks_history = []
+        self.anonymizer = ResumeAnonymizer()
+        self.esco_framework = ESCOSkillFramework()
+        self.task_generator = DailyTaskGenerator()
+        self.feedback_data = []
+    
+    def process_resume(self, resume_text: str) -> Dict:
+        """Process and analyze resume with anonymization"""
+        print("🔒 Anonymizing resume data...")
+        
+        # Extract skills safely
+        skills = self.anonymizer.extract_skills_safely(resume_text)
+        
+        # Generate anonymized profile hash for tracking
+        profile_hash = hashlib.sha256(resume_text.encode()).hexdigest()[:8]
+        
+        # Extract experience level (simplified heuristic)
+        experience_years = self._estimate_experience_from_text(resume_text)
+        
+        return {
+            'profile_id': profile_hash,
+            'extracted_skills': skills,
+            'estimated_experience_years': experience_years,
+            'anonymization_status': 'completed',
+            'processing_date': datetime.now().isoformat()
+        }
+    
+    def _estimate_experience_from_text(self, text: str) -> int:
+        """Estimate years of experience from resume text"""
+        # Look for year patterns and experience keywords
+        year_pattern = r'20\d{2}'
+        years = re.findall(year_pattern, text)
+        
+        if len(years) >= 2:
+            years_int = [int(year) for year in years]
+            return max(years_int) - min(years_int)
+        
+        # Fallback: look for experience keywords
+        experience_keywords = ['years', 'experience', 'worked', 'employed']
+        if any(keyword in text.lower() for keyword in experience_keywords):
+            return 2  # Assume some experience
+        
+        return 0  # Fresh graduate
+    
+    def set_performance_goals(self):
+        """Interactive goal setting with deadlines"""
+        print("\n🎯 Performance Goals & Deadlines Setup")
+        print("-" * 40)
+        
+        while True:
+            print("\nAdd a new goal:")
+            title = input("Goal title: ")
+            description = input("Detailed description: ")
+            deadline = input("Deadline (YYYY-MM-DD): ")
+            priority = input("Priority (high/medium/low): ").lower()
+            target_level = int(input("Target skill level (1-5, where 5 is expert): "))
+            
+            goal = Goal(
+                id=str(uuid.uuid4()),
+                title=title,
+                deadline=deadline,
+                priority=priority,
+                description=description,
+                target_skill_level=target_level
+            )
+            
+            self.goals.append(goal)
+            print(f"✅ Goal '{title}' added successfully!")
+            
+            if input("\nAdd another goal? (y/n): ").lower() != 'y':
+                break
+    
+    def perform_skill_gap_analysis(self, target_role: str = None) -> Dict:
+        """Comprehensive skill gap analysis using ESCO framework"""
+        if not self.user_profile.get('extracted_skills'):
+            return {'error': 'No resume processed yet. Please upload resume first.'}
+        
+        if not target_role:
+            print("\nAvailable roles for analysis:")
+            roles = list(self.esco_framework.skill_taxonomy.keys())
+            for i, role in enumerate(roles, 1):
+                print(f"{i}. {role.replace('_', ' ').title()}")
+            
+            try:
+                choice = int(input("Select target role (number): ")) - 1
+                target_role = roles[choice]
+            except (ValueError, IndexError):
+                return {'error': 'Invalid role selection'}
+        
+        user_skills = self.user_profile['extracted_skills']
+        benchmark = self.esco_framework.benchmark_skills(user_skills, target_role)
+        
+        # Add personalized recommendations
+        benchmark['recommendations'] = self._generate_skill_recommendations(
+            benchmark['missing_required_skills'],
+            benchmark['missing_recommended_skills']
+        )
+        
+        return benchmark
+    
+    def _generate_skill_recommendations(self, missing_required: List[str], missing_recommended: List[str]) -> Dict:
+        """Generate personalized skill improvement recommendations"""
+        recommendations = {
+            'immediate_focus': [],
+            'medium_term': [],
+            'long_term': []
+        }
+        
+        # Immediate focus on required skills
+        for skill in missing_required[:3]:  # Top 3 most important
+            recommendations['immediate_focus'].append({
+                'skill': skill,
+                'reason': 'Critical for role requirements',
+                'suggested_timeline': '1-2 months',
+                'learning_path': f"Start with beginner courses in {skill}"
+            })
+        
+        # Medium term for remaining required skills
+        for skill in missing_required[3:]:
+            recommendations['medium_term'].append({
+                'skill': skill,
+                'reason': 'Required for role proficiency',
+                'suggested_timeline': '3-6 months'
+            })
+        
+        # Long term for recommended skills
+        for skill in missing_recommended:
+            recommendations['long_term'].append({
+                'skill': skill,
+                'reason': 'Enhances competitiveness',
+                'suggested_timeline': '6-12 months'
+            })
+        
+        return recommendations
+    
+    def generate_daily_tasks(self) -> List[DailyTask]:
+        """Generate today's personalized tasks"""
+        if not self.goals:
+            return []
+        
+        today_tasks = []
+        current_date = datetime.now()
+        
+        for goal in self.goals:
+            # Calculate days remaining
+            deadline_date = datetime.strptime(goal.deadline, '%Y-%m-%d')
+            days_remaining = (deadline_date - current_date).days
+            
+            if days_remaining <= 0:
+                continue  # Skip overdue goals
+            
+            # Determine user skill level (simplified)
+            user_skill_level = SkillLevel.BEGINNER  # Default, can be improved with better profiling
+            
+            # Generate tasks for this goal
+            goal_tasks = self.task_generator.generate_tasks_for_goal(
+                goal, user_skill_level, days_remaining
+            )
+            
+            today_tasks.extend(goal_tasks)
+        
+        # Store tasks for tracking
+        self.daily_tasks = today_tasks
+        return today_tasks
+    
+    def complete_task(self, task_id: str, feedback: str = None):
+        """Mark task as completed and collect feedback"""
+        for task in self.daily_tasks:
+            if task.id == task_id:
+                task.is_completed = True
+                task.completion_date = datetime.now().isoformat()
+                
+                # Store in history
+                self.completed_tasks_history.append(task)
+                
+                # Collect feedback
+                if feedback:
+                    self.feedback_data.append({
+                        'task_id': task_id,
+                        'feedback': feedback,
+                        'completion_date': task.completion_date,
+                        'difficulty_rating': input("Rate difficulty (1-5): "),
+                        'usefulness_rating': input("Rate usefulness (1-5): ")
+                    })
+                
+                print(f"✅ Task '{task.title}' marked as completed!")
+                return
+        
+        print("❌ Task not found!")
+    
+    def get_progress_report(self) -> Dict:
+        """Generate comprehensive progress report"""
+        total_tasks = len(self.completed_tasks_history)
+        
+        if total_tasks == 0:
+            return {'message': 'No tasks completed yet'}
+        
+        # Calculate completion rates
+        completed_today = len([t for t in self.completed_tasks_history 
+                              if t.completion_date and 
+                              datetime.fromisoformat(t.completion_date).date() == datetime.now().date()])
+        
+        # Skill development progress
+        skills_practiced = {}
+        for task in self.completed_tasks_history:
+            skill = task.skill_category
+            skills_practiced[skill] = skills_practiced.get(skill, 0) + 1
+        
+        # Goal progress
+        goal_progress = []
+        for goal in self.goals:
+            related_tasks = [t for t in self.completed_tasks_history 
+                           if goal.title.lower() in t.title.lower() or 
+                           goal.description.lower() in t.description.lower()]
+            progress_percentage = min((len(related_tasks) / 10) * 100, 100)  # Assume 10 tasks per goal
+            goal_progress.append({
+                'goal': goal.title,
+                'progress': f"{progress_percentage:.1f}%",
+                'deadline': goal.deadline,
+                'tasks_completed': len(related_tasks)
+            })
+        
+        return {
+            'total_tasks_completed': total_tasks,
+            'tasks_completed_today': completed_today,
+            'skills_development': skills_practiced,
+            'goal_progress': goal_progress,
+            'average_task_completion_time': self._calculate_avg_completion_time(),
+            'productivity_streak': self._calculate_streak()
+        }
+    
+    def _calculate_avg_completion_time(self) -> str:
+        """Calculate average task completion time"""
+        if not self.completed_tasks_history:
+            return "No data"
+        
+        total_time = sum(task.estimated_time for task in self.completed_tasks_history)
+        avg_time = total_time / len(self.completed_tasks_history)
+        return f"{avg_time:.1f} minutes"
+    
+    def _calculate_streak(self) -> int:
+        """Calculate current productivity streak"""
+        # Simplified streak calculation
+        return len(self.completed_tasks_history) // 5  # 1 streak point per 5 completed tasks
+    
+    def run_interactive_session(self):
+        """Main interactive session"""
+        print("🚀 Advanced Early Talent AI Career Agent")
+        print("=" * 50)
+        print("Enhance productivity • Close skill gaps • Achieve career goals")
+        print()
+        
+        while True:
+            print("\n🤖 What would you like to do?")
+            print("1. 📄 Process Resume (Upload & Analyze)")
+            print("2. 🎯 Set Performance Goals & Deadlines")
+            print("3. 📊 Perform Skill Gap Analysis")
+            print("4. 📝 Generate Today's Tasks")
+            print("5. ✅ Complete Task")
+            print("6. 📈 View Progress Report")
+            print("7. 🔄 Provide Feedback & Recalibrate")
+            print("8. 👥 Employer Mode (Benchmark Against Top Talent)")
+            print("9. 🚪 Exit")
+            
+            try:
+                choice = int(input("\nSelect option (1-9): "))
+                
+                if choice == 1:
+                    print("\n📄 Resume Processing")
+                    print("Note: In a real implementation, you would upload a PDF file.")
+                    resume_text = input("Paste resume text (or type 'demo' for demo data): ")
+                    
+                    if resume_text.lower() == 'demo':
+                        resume_text = """
+                        Software Developer with 3 years experience in Python, JavaScript, and React.
+                        Worked at TechCorp from 2021-2024. Skills include Django, PostgreSQL, Git, AWS.
+                        Bachelor's degree in Computer Science. Experience with agile development, 
+                        team leadership, and project management.
+                        """
+                    
+                    result = self.process_resume(resume_text)
+                    self.user_profile = result
+                    
+                    print(f"\n✅ Resume processed successfully!")
+                    print(f"Profile ID: {result['profile_id']}")
+                    print(f"Extracted Skills: {', '.join(result['extracted_skills'])}")
+                    print(f"Estimated Experience: {result['estimated_experience_years']} years")
+                
+                elif choice == 2:
+                    self.set_performance_goals()
+                
+                elif choice == 3:
+                    analysis = self.perform_skill_gap_analysis()
+                    if 'error' in analysis:
+                        print(f"❌ {analysis['error']}")
+                    else:
+                        print(f"\n📊 Skill Gap Analysis Results")
+                        print("-" * 35)
+                        print(f"Current Skill Coverage: {analysis['skill_coverage_percentage']}%")
+                        print(f"Market Demand: {analysis['market_demand'].upper()}")
+                        print(f"\n🔴 Missing Required Skills:")
+                        for skill in analysis['missing_required_skills']:
+                            print(f"   • {skill}")
+                        print(f"\n🟡 Missing Recommended Skills:")
+                        for skill in analysis['missing_recommended_skills']:
+                            print(f"   • {skill}")
+                        
+                        if 'recommendations' in analysis:
+                            print(f"\n💡 Personalized Recommendations:")
+                            for rec in analysis['recommendations']['immediate_focus']:
+                                print(f"   🎯 {rec['skill']}: {rec['reason']}")
+                
+                elif choice == 4:
+                    tasks = self.generate_daily_tasks()
+                    if not tasks:
+                        print("❌ No goals set. Please set performance goals first.")
+                    else:
+                        print(f"\n📝 Today's Personalized Tasks ({len(tasks)} tasks)")
+                        print("-" * 40)
+                        for i, task in enumerate(tasks, 1):
+                            print(f"\n{i}. 📘 {task.title}")
+                            print(f"   ⏱️  Estimated time: {task.estimated_time} minutes")
+                            print(f"   🎚️  Difficulty: {task.difficulty.value}")
+                            print(f"   📖 Description: {task.description}")
+                            print(f"   📚 Resources:")
+                            for resource in task.resources:
+                                print(f"      • {resource}")
+                            print(f"   ✅ Success Criteria:")
+                            for criterion in task.success_criteria:
+                                print(f"      • {criterion}")
+                
+                elif choice == 5:
+                    if not self.daily_tasks:
+                        print("❌ No active tasks. Generate today's tasks first.")
+                    else:
+                        print("\nActive Tasks:")
+                        for i, task in enumerate(self.daily_tasks, 1):
+                            status = "✅" if task.is_completed else "⏳"
+                            print(f"{i}. {status} {task.title}")
+                        
+                        try:
+                            task_num = int(input("\nSelect task to complete (number): ")) - 1
+                            if 0 <= task_num < len(self.daily_tasks):
+                                task = self.daily_tasks[task_num]
+                                feedback = input("Any feedback on this task? (optional): ")
+                                self.complete_task(task.id, feedback)
+                            else:
+                                print("❌ Invalid task number")
+                        except ValueError:
+                            print("❌ Please enter a valid number")
+                
+                elif choice == 6:
+                    report = self.get_progress_report()
+                    if 'message' in report:
+                        print(f"📊 {report['message']}")
+                    else:
+                        print(f"\n📈 Progress Report")
+                        print("-" * 25)
+                        print(f"Total Tasks Completed: {report['total_tasks_completed']}")
+                        print(f"Tasks Completed Today: {report['tasks_completed_today']}")
+                        print(f"Productivity Streak: {report['productivity_streak']} points")
+                        print(f"Average Task Time: {report['average_task_completion_time']}")
+                        
+                        print(f"\n🎯 Goal Progress:")
+                        for goal_prog in report['goal_progress']:
+                            print(f"   • {goal_prog['goal']}: {goal_prog['progress']} (Deadline: {goal_prog['deadline']})")
+                        
+                        print(f"\n💪 Skills Development:")
+                        for skill, count in report['skills_development'].items():
+                            print(f"   • {skill}: {count} tasks completed")
+                
+                elif choice == 7:
+                    print("\n🔄 Feedback & Recalibration")
+                    difficulty_feedback = input("Are tasks too easy (e), just right (r), or too hard (h)? ").lower()
+                    
+                    if difficulty_feedback == 'e':
+                        print("📈 Tasks will be made more challenging in future generations.")
+                    elif difficulty_feedback == 'h':
+                        print("📉 Tasks will be simplified in future generations.")
+                    else:
+                        print("✅ Current difficulty level maintained.")
+                    
+                    # Store feedback for future improvements
+                    self.feedback_data.append({
+                        'type': 'difficulty_calibration',
+                        'feedback': difficulty_feedback,
+                        'date': datetime.now().isoformat()
+                    })
+                
+                elif choice == 8:
+                    print("\n👥 Employer Mode - Benchmark Against Top Talent")
+                    print("Note: In production, employers could upload competitor resumes")
+                    
+                    benchmark_text = input("Paste benchmark resume text (or 'demo' for demo): ")
+                    if benchmark_text.lower() == 'demo':
+                        benchmark_text = """
+                        Senior Software Engineer with 5 years experience. Expert in Python, React, 
+                        Node.js, AWS, Docker, Kubernetes. Led teams of 8+ developers. 
+                        Experience with microservices, system design, DevOps practices.
+                        """
+                    
+                    benchmark_profile = self.process_resume(benchmark_text)
+                    
+                    print(f"\n📊 Benchmark Analysis:")
+                    print(f"Benchmark Skills: {', '.join(benchmark_profile['extracted_skills'])}")
+                    
+                    if self.user_profile:
+                        user_skills = set(self.user_profile['extracted_skills'])
+                        benchmark_skills = set(benchmark_profile['extracted_skills'])
+                        
+                        skill_gap = benchmark_skills - user_skills
+                        common_skills = user_skills & benchmark_skills
+                        
+                        print(f"\n✅ Skills Match: {', '.join(common_skills) if common_skills else 'None'}")
+                        print(f"🎯 Skills to Develop: {', '.join(skill_gap) if skill_gap else 'None'}")
+                        print(f"📈 Skill Coverage: {len(common_skills)/len(benchmark_skills)*100:.1f}%")
+                    else:
+                        print("❌ Please process your resume first for comparison.")
+                
+                elif choice == 9:
+                    print("\n🎉 Thank you for using the Advanced Career Agent!")
+                    print("Keep learning, stay consistent, and achieve your goals! 🚀")
+                    break
+                
+                else:
+                    print("❌ Invalid option. Please select 1-9.")
+            
+            except ValueError:
+                print("❌ Please enter a valid number.")
+            except KeyboardInterrupt:
+                print("\n\n👋 Session ended. Your progress has been saved!")
+                break
+
+# Main execution
+if __name__ == "__main__":
+    agent = AdvancedCareerAgent()
+    agent.run_interactive_session()
