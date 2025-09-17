@@ -1,13 +1,13 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from datetime import date, timedelta
 import re, random
 
-app = FastAPI(title="Skill Planner (Step-by-step unlock)", version="3.0")
+app = FastAPI(title="Skill Planner (step unlock + carry + monthly report)", version="5.2")
 
-# ---------------- Company skills in strict coding order (12 weeks each) ---------------
+# ---------------------- Company skills (10 areas, 12 weeks each) ----------------------
 COMPANY_SKILLS: Dict[str, Dict] = {
     "programming_languages": {
         "keywords": ["java", "python", "c++", "c#", "javascript", "sql"],
@@ -51,8 +51,8 @@ COMPANY_SKILLS: Dict[str, Dict] = {
             "Design patterns: factory/singleton/observer (UML)",
             "Microservices intro (system diagram)",
             "API gateway & service discovery (Kong/NGINX)",
-            "Load balancing & HA",
-            "DB design & sharding (ER)",
+            "Load balancing & high availability",
+            "Database design & sharding (ER diagrams)",
             "Messaging & async (RabbitMQ/Kafka)",
             "Observability (Prometheus+Grafana)",
             "Security: AuthN/Z (JWT)",
@@ -80,16 +80,16 @@ COMPANY_SKILLS: Dict[str, Dict] = {
     "databases": {
         "keywords": ["database","sql","mysql","postgresql","nosql"],
         "syllabus": [
-            "DB fundamentals",
-            "Relational model & ER (draw.io)",
-            "SQL basics (Workbench/psql)",
+            "Database fundamentals",
+            "Relational model & ER diagrams",
+            "SQL basics (MySQL/Postgres)",
             "SQL advanced: JOIN/aggregation",
             "Transactions & ACID",
             "Indexes & optimization (EXPLAIN)",
             "Stored procedures & triggers",
             "NoSQL: MongoDB/Redis",
             "Distributed DB & CAP",
-            "Security & backups (mysqldump)",
+            "Security & backups",
             "Performance tuning & caching",
             "Capstone: mini DB app"
         ]
@@ -108,7 +108,7 @@ COMPANY_SKILLS: Dict[str, Dict] = {
             "GitHub Actions CI (minimal)",
             "Best practices (Git Flow)",
             "Code review workflow",
-            "Capstone: multi-contributor"
+            "Capstone: multi-contributor project"
         ]
     },
     "apis_web": {
@@ -121,7 +121,7 @@ COMPANY_SKILLS: Dict[str, Dict] = {
             "API docs & Swagger",
             "GraphQL basics",
             "GraphQL queries & mutations",
-            "Security & rate limiting",
+            "API security & rate limiting",
             "Caching & performance (Redis)",
             "API testing (pytest+requests)",
             "Deployment & ops (Heroku/AWS)",
@@ -141,7 +141,7 @@ COMPANY_SKILLS: Dict[str, Dict] = {
             "Auto-scaling & load balancing",
             "CI/CD on cloud (CloudFormation/ARM)",
             "Monitoring & logging (CloudWatch/Stackdriver)",
-            "Cost mgmt & optimization",
+            "Cost management & optimization",
             "Capstone: deploy to cloud"
         ]
     },
@@ -158,7 +158,7 @@ COMPANY_SKILLS: Dict[str, Dict] = {
             "Helm & config management",
             "Monitoring & logs (Prometheus+Grafana)",
             "Automation & pipelines (Jenkins pipeline)",
-            "Release & rollback",
+            "Release & rollback strategies",
             "Capstone: end-to-end CI/CD"
         ]
     },
@@ -166,23 +166,23 @@ COMPANY_SKILLS: Dict[str, Dict] = {
         "keywords": ["testing","unit test","integration test","debugging"],
         "syllabus": [
             "Testing basics & unit tests (PyTest/JUnit)",
-            "Framework advanced (parametrization)",
+            "Test frameworks advanced (parametrization)",
             "Integration tests & mocking",
-            "Coverage & reports (coverage/jacoco)",
+            "Coverage & reports (coverage.py/jacoco)",
             "Debugging & logging (IDE+pdb)",
-            "Debugging tools (DevTools etc.)",
-            "Performance/load (JMeter/Locust)",
-            "Automation (Selenium/Playwright)",
-            "Security testing (OWASP ZAP)",
-            "Continuous testing (GitHub Actions)",
-            "Best practices",
-            "Capstone: E2E test suite"
+            "Debugging tools (Chrome DevTools etc.)",
+            "Performance & load testing (JMeter/Locust)",
+            "Automation testing (Selenium/Playwright)",
+            "Security testing basics (OWASP ZAP)",
+            "Continuous testing & CI (GitHub Actions)",
+            "Testing best practices",
+            "Capstone: end-to-end test suite"
         ]
     }
 }
 CODING_ORDER = list(COMPANY_SKILLS.keys())
 
-# ---------------- Regex + in-memory state ----------------
+# ---------------------- Regex + in-memory state ----------------------
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"\b(?:\+?\d[\d\s-]{7,}\d)\b")
 TOKEN_RE = re.compile(r"[A-Za-z+#.]+")  # crude tokens
@@ -202,10 +202,11 @@ class CurrentTask(BaseModel):
     start: date
     end: date
     topic: str
-    prompt: str  # what to ask the user
+    prompt: str
 
-DB: Dict[str, dict] = {}  # resume, missing, plan_all, cursor, pending_code
+DB: Dict[str, dict] = {}  # resume, missing, plan_all, cursor, unlock_code, report_codes
 
+# ---------------------- Helpers ----------------------
 def extract_name(raw: str) -> Optional[str]:
     for line in raw.splitlines():
         if line.lower().startswith("name:"):
@@ -228,9 +229,9 @@ def linear_queue(missing: List[str]) -> List[Dict]:
             q.append({"skill": skill, "topic": topic, "topic_idx": i})
     return q
 
-def schedule(q: List[Dict], start_date: date) -> List[Dict]:
+def schedule_monthly(q: List[Dict], start_date: date) -> List[Dict]:
     tasks = []
-    for i, item in enumerate(q):  # i from 0
+    for i, item in enumerate(q):
         month = (i // 4) + 1
         week_in_month = (i % 4) + 1
         ws = start_date + timedelta(weeks=i)
@@ -245,37 +246,45 @@ def schedule(q: List[Dict], start_date: date) -> List[Dict]:
 
 def get_current_task_obj() -> Optional[CurrentTask]:
     if "plan_all" not in DB or "cursor" not in DB: return None
-    cur = DB["cursor"]
-    plan = DB["plan_all"]
+    cur = DB["cursor"]; plan = DB["plan_all"]
     if cur >= len(plan): return None
     t = plan[cur]
     return CurrentTask(
         id=t["id"], skill=t["skill"], week_global=t["week_global"],
         month=t["month"], week_in_month=t["week_in_month"],
         start=t["start"], end=t["end"], topic=t["topic"],
-        prompt="Have you completed this week's task? Type YES at /answer to receive an unlock code."
+        prompt="Have you completed this week's task? Type YES at /answer (NO will repeat this topic next week)."
     )
 
-# ------------- Helpers for unlock code -------------
+def ensure_plan_exists():
+    if "plan_all" in DB: return
+    if "missing" not in DB:
+        raise HTTPException(400, "Call /missing-skills first.")
+    start = date.today()
+    q = linear_queue(DB["missing"])
+    DB["plan_all"] = schedule_monthly(q, start_date=start)
+    DB["cursor"] = 0
+    DB["unlock_code"] = None
+    DB["report_codes"] = {}
+
 def gen_code() -> str:
     return f"{random.randint(100000, 999999)}"
 
-# ---------------- Routes ----------------
+def id_to_topic_idx(task_id: str) -> int:
+    return int(task_id.split("t")[-1])
+
+# ---------------------- Routes ----------------------
 @app.get("/", include_in_schema=False)
 def root():
     return RedirectResponse(url="/docs")
 
-# 1) Upload resume
+# Upload resume
 @app.post("/upload", response_model=ResumeData)
 async def upload_resume(file: UploadFile = File(...)):
     raw = (await file.read()).decode(errors="ignore")
     emails = EMAIL_RE.findall(raw)
     phones = PHONE_RE.findall(raw)
     tokens = TOKEN_RE.findall(raw)
-
-    _ = EMAIL_RE.sub("[EMAIL]", raw)
-    _ = PHONE_RE.sub("[PHONE]", _)
-
     resume = ResumeData(
         name=extract_name(raw) or "Unknown",
         emails=["[REDACTED]"] if emails else [],
@@ -285,94 +294,166 @@ async def upload_resume(file: UploadFile = File(...)):
     DB["resume"] = resume.model_dump()
     return resume
 
-# 2) Show missing skills (coding order)
+# Compute missing skills (coding order)
 @app.get("/missing-skills")
 def missing_skills():
     if "resume" not in DB:
         raise HTTPException(400, "Upload a resume first: /upload")
     owned = set(DB["resume"]["skills_found"])
-    required = CODING_ORDER
-    missing = [s for s in required if s not in owned]
+    missing = [s for s in CODING_ORDER if s not in owned]
     DB["missing"] = missing
-    return {"missing_skills": missing, "order_used": required}
+    return {"missing_skills": missing, "order_used": CODING_ORDER}
 
-# 3) Build plan & show ONLY the first task
-class PlanRequest(BaseModel):
-    start_date: Optional[date] = None
-
-@app.post("/plan", response_model=CurrentTask)
-def build_plan(req: PlanRequest = Body(default=PlanRequest())):
-    if "missing" not in DB:
-        raise HTTPException(400, "Call /missing-skills first")
-    start = req.start_date or date.today()
-    q = linear_queue(DB["missing"])
-    plan = schedule(q, start_date=start)
-    DB["plan_all"] = plan
-    DB["cursor"] = 0
-    DB["pending_code"] = None
-    cur = get_current_task_obj()
-    if not cur:
-        raise HTTPException(400, "No tasks generated")
-    return cur
-
-# 4) Get current task again (for display)
+# Get current task (auto-plan on first call)
 @app.get("/current-task", response_model=CurrentTask)
 def current_task():
+    ensure_plan_exists()
     cur = get_current_task_obj()
     if not cur:
         raise HTTPException(404, "All tasks completed 🎉")
     return cur
 
-# 5) User answers if done -> only needs to type YES
+# Answer YES/NO for current task — monthly code ONLY if Week 4
 class AnswerBody(BaseModel):
     answer: str
 
 @app.post("/answer")
 def answer(body: AnswerBody):
-    if "plan_all" not in DB or "cursor" not in DB:
-        raise HTTPException(400, "Build plan first: /plan")
+    ensure_plan_exists()
     ans = body.answer.strip().lower()
-    if ans not in ("yes", "y"):
-        return {"ok": False, "msg": "Got it. Come back when it's done."}
-    # mark current as done
-    cur = DB["cursor"]
+    cur_idx = DB["cursor"]
     plan = DB["plan_all"]
-    if cur >= len(plan):
-        return {"ok": True, "msg": "All tasks already completed."}
-    plan[cur]["done"] = True
-    # generate unlock code
-    code = gen_code()
-    DB["pending_code"] = code
+    if cur_idx >= len(plan):
+        return {"ok": True, "msg": "All tasks completed."}
+
+    current = plan[cur_idx]
+    current_month = current["month"]
+    monthly_code = None
+    if current["week_in_month"] == 4:
+        monthly_code = gen_code()
+        DB["report_codes"][current_month] = monthly_code  # month-specific key
+
+    if ans in ("yes", "y"):
+        current["done"] = True
+        unlock = gen_code()
+        DB["unlock_code"] = unlock
+        return {
+            "ok": True,
+            "msg": "Great! Use this code at /unlock-next.",
+            "unlock_code": unlock,
+            "monthly_report_code": monthly_code,
+            "month": current_month
+        }
+
+    # NO: repeat current topic next week; shift plan
+    item = {"skill": current["skill"], "topic": current["topic"], "topic_idx": id_to_topic_idx(current["id"])}
+    def to_q(tasks: List[dict]) -> List[Dict]:
+        return [{"skill": t["skill"], "topic": t["topic"], "topic_idx": id_to_topic_idx(t["id"])} for t in tasks]
+    before = plan[:cur_idx]
+    after  = plan[cur_idx+1:]
+    q = to_q(before + [current] + [current] + after)
+    base_start = plan[0]["start"]
+    new_plan = schedule_monthly(q, start_date=base_start)
+
+    # keep 'done' flags best-effort
+    def key(t): return (t["skill"], id_to_topic_idx(t["id"]))
+    done_map = {key(t): t.get("done", False) for t in plan}
+    for t in new_plan:
+        t["done"] = done_map.get(key(t), False)
+
+    DB["plan_all"] = new_plan
+    DB["cursor"] = cur_idx + 1
+    DB["unlock_code"] = None
+
+    next_task = get_current_task_obj()
     return {
         "ok": True,
-        "msg": "Great job! Use this code to unlock the next task at /unlock-next",
-        "unlock_code": code,
-        "current_task_id": plan[cur]["id"]
+        "msg": "Noted. The same topic is scheduled again for next week.",
+        "next_task": next_task,
+        "monthly_report_code": monthly_code,  # None unless Week 4
+        "month": current_month
     }
 
-# 6) Unlock next by code (reveals ONLY the next task)
+# Unlock next task
 class UnlockBody(BaseModel):
     code: str
 
 @app.post("/unlock-next", response_model=CurrentTask)
 def unlock_next(body: UnlockBody):
-    if "plan_all" not in DB or "cursor" not in DB:
-        raise HTTPException(400, "Build plan first: /plan")
-    if not DB.get("pending_code"):
-        raise HTTPException(400, "No pending code. Complete the current task first at /answer with YES.")
-    if body.code.strip() != DB["pending_code"]:
-        raise HTTPException(401, "Invalid code. Please re-enter the correct unlock code.")
-    # advance pointer
-    DB["pending_code"] = None
+    ensure_plan_exists()
+    if not DB.get("unlock_code"):
+        raise HTTPException(400, "No unlock code. Answer YES first.")
+    if body.code.strip() != DB["unlock_code"]:
+        raise HTTPException(401, "Invalid unlock code.")
+    DB["unlock_code"] = None
     DB["cursor"] += 1
     cur = get_current_task_obj()
     if not cur:
         raise HTTPException(404, "All tasks completed 🎉")
     return cur
 
-# 7) Reset
+# Monthly Grow Report — shows 'done' and 'overdue' with original due week; pre-mastered skills treated as 100% and 'mastered'
+@app.get("/report")
+def report(month: int, code: str):
+    ensure_plan_exists()
+    if DB.get("report_codes", {}).get(month) != code:
+        raise HTTPException(401, "Invalid monthly report code.")
+
+    plan = DB["plan_all"]
+    name = DB.get("resume", {}).get("name", "Unknown")
+
+    # Determine pre-mastered skills (from resume)
+    resume_skills = set(DB.get("resume", {}).get("skills_found", []))
+    missing = set(DB.get("missing", []))
+    pre_mastered = [s for s in CODING_ORDER if s not in missing]  # already had; not in missing
+
+    # Month tasks (should be 4)
+    month_tasks = [t for t in plan if t["month"] == month]
+
+    # Completion percent for the month
+    total = len(month_tasks) or 4
+    done_count = sum(1 for t in month_tasks if t.get("done"))
+    completion_percent = int(round(done_count / total * 100))
+
+    # In a monthly report view, anything not done for that month is overdue.
+    detailed_tasks = []
+    for t in month_tasks:
+        status = "done" if t.get("done") else "overdue"
+        detailed_tasks.append({
+            "id": t["id"],
+            "skill": t["skill"],
+            "topic": t["topic"],
+            "original_due_week": t["week_in_month"],
+            "status": status
+        })
+
+    # Skill progress: pre-mastered = 100%; others = (#done topics in plan)/12
+    skills_progress = {}
+    for s in CODING_ORDER:
+        if s in pre_mastered:
+            skills_progress[s] = 100
+        else:
+            done_topics = sum(1 for t in plan if t["skill"] == s and t.get("done"))
+            skills_progress[s] = int(round(done_topics / 12 * 100))
+
+    # Completed skills list includes pre-mastered + any skill reaching 100% via plan
+    completed_skills = sorted(set(pre_mastered + [s for s, p in skills_progress.items() if p >= 100]))
+
+    # Remaining skills exclude pre-mastered; show percent
+    remaining_skills = {s: p for s, p in skills_progress.items() if s not in pre_mastered and p < 100}
+
+    return {
+        "name": name,
+        "month": month,
+        "completion_percent": completion_percent,
+        "completed_skills": completed_skills,           # includes resume-owned skills
+        "skills_progress_percent": skills_progress,     # chart data: pre-mastered are 100%
+        "remaining_skills_percent": remaining_skills,
+        "tasks": detailed_tasks                         # each has topic + original_due_week + status
+    }
+
+# Reset
 @app.post("/reset")
 def reset():
     DB.clear()
-    return {"ok": True, "msg": "Cleared resume, gaps, plan, cursor, code"}
-
+    return {"ok": True, "msg": "Cleared all data"}
